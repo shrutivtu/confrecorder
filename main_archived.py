@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from langchain_community.document_loaders import TextLoader
 from langchain_mistralai.chat_models import ChatMistralAI
@@ -10,9 +10,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain.chains import create_retrieval_chain
 from langchain_community.vectorstores.faiss import FAISS
 import config
-import speech_recognition as sr  # For speech-to-text conversion
-import os
-import tempfile
 
 # Load API key
 api_key = config.api_key
@@ -40,37 +37,18 @@ retrieval_chain = create_retrieval_chain(retriever, document_chain)
 app = FastAPI()
 
 # Define request and response models
+class QueryRequest(BaseModel):
+    input: str
+
 class QueryResponse(BaseModel):
     answer: str
 
-@app.post("/query-audio", response_model=QueryResponse)
-async def query_audio_retrieval_chain(file: UploadFile = File(...)):
-    """
-    Endpoint to process an audio file, convert it to text, and return the response.
-    """
+@app.post("/query", response_model=QueryResponse)
+async def query_retrieval_chain(request: QueryRequest):
     try:
-        # Save the uploaded audio file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
-            temp_file.write(await file.read())
-            temp_audio_path = temp_file.name
-
-        # Convert audio to text using speech recognition
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(temp_audio_path) as audio_file:
-            audio_data = recognizer.record(audio_file)
-            text_input = recognizer.recognize_google(audio_data)  # Use Google's speech recognition
-
-        # Clean up the temporary file
-        os.remove(temp_audio_path)
-
-        # Invoke the retrieval chain with the transcribed text
-        response = retrieval_chain.invoke({"input": text_input})
+        # Invoke the retrieval chain with the input question
+        response = retrieval_chain.invoke({"input": request.input})
         return QueryResponse(answer=response["answer"])
-
-    except sr.UnknownValueError:
-        raise HTTPException(status_code=400, detail="Could not understand the audio.")
-    except sr.RequestError as e:
-        raise HTTPException(status_code=500, detail=f"Speech recognition service error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
